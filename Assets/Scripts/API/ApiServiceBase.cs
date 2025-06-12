@@ -10,7 +10,7 @@ namespace API
     public abstract class ApiServiceBase : MonoBehaviour
     {
         [Header("API Configuration")]
-        public string baseUrl = "http://192.168.18.122:8000";
+        public string baseUrl = "https://192.168.18.122:8017";
         
         [Header("SSL Configuration")]
         public bool skipSSLValidation = true;

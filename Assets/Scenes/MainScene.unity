@@ -176,12 +176,12 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: content content content content content content content content content
-    content content content content content content content content content content
-    content content
+  m_text: 'content content content content content content content content content
+    content content content content content content content content content content  '
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: c0afd89d1b5a23d4690248161018c016, type: 2}
+  m_sharedMaterial: {fileID: 7763683596668670923, guid: c0afd89d1b5a23d4690248161018c016,
+    type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -257,6 +257,57 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8392834}
   m_CullTransparentMesh: 1
+--- !u!1 &62949891
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 62949892}
+  - component: {fileID: 62949893}
+  m_Layer: 0
+  m_Name: PresentationManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &62949892
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 62949891}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 170.59872, y: 28.424622, z: -59.087822}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &62949893
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 62949891}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bbc608af1acf4bc3bbade824aa9ae034, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  screenMeshRenderer: {fileID: 352553830}
+  screenMaterial: {fileID: 2100000, guid: 451c5e3283e21294e867efbc52c4fb59, type: 2}
+  audioSource: {fileID: 1553250693}
+  contentText: {fileID: 8392836}
+  speechService: {fileID: 1165139449}
+  preloadCount: 3
+  delayBetweenNodes: 0.5
 --- !u!1 &284523648
 GameObject:
   m_ObjectHideFlags: 0
@@ -1082,6 +1133,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1165139448}
   - component: {fileID: 1165139447}
+  - component: {fileID: 1165139449}
   m_Layer: 0
   m_Name: ScreenManager
   m_TagString: Untagged
@@ -1105,6 +1157,8 @@ MonoBehaviour:
   screenMeshRenderer: {fileID: 352553830}
   audioSource: {fileID: 1553250693}
   contentText: {fileID: 8392836}
+  presentationManager: {fileID: 62949893}
+  _useNewPresentationSystem: 1
 --- !u!4 &1165139448
 Transform:
   m_ObjectHideFlags: 0
@@ -1123,6 +1177,30 @@ Transform:
   - {fileID: 1553250694}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1165139449
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1165139446}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 55a2d2a1560d44ed9264326b33355b6d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  baseUrl: https://192.168.18.122:8017
+  skipSSLValidation: 1
+  enableDebugLogs: 1
+  timeoutSeconds: 60
+  maxRetries: 3
+  retryDelaySeconds: 2
+  defaultVoice: default
+  defaultLanguage: zh-CN
+  defaultSpeed: 1
+  defaultPitch: 1
+  defaultTtsModel: 
+  autoConvertToAudioClip: 1
 --- !u!1 &1193111165
 GameObject:
   m_ObjectHideFlags: 0
@@ -4157,6 +4235,7 @@ SceneRoots:
   - {fileID: 832575519}
   - {fileID: 1041113248345642988}
   - {fileID: 1419005869}
+  - {fileID: 62949892}
   - {fileID: 1165139448}
   - {fileID: 883175157}
   - {fileID: 1193111169}
