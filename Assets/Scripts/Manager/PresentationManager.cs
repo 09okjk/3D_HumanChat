@@ -11,6 +11,8 @@ namespace Manager
 {
     public class PresentationManager : MonoBehaviour
     {
+        public static PresentationManager Instance;
+        
         [Header("UI References")]
         public MeshRenderer screenMeshRenderer;
         public Material screenMaterial;
@@ -63,7 +65,20 @@ namespace Manager
         public Action OnPresentationStarted;
         public Action OnPresentationCompleted;
         public Action<string> OnError;
-    
+
+        private void Awake()
+        {
+            if (Instance == null)
+            {
+                Instance = this;
+            }
+            else
+            {
+                Destroy(gameObject);
+                return;
+            }
+        }
+
         private void Start()
         {
             InitializePresentation();
@@ -141,6 +156,9 @@ namespace Manager
             isPaused = false;
             audioSource.Stop();
             currentNodeIndex = -1;
+            
+            // host停止移动
+            
         
             // 清理音频缓存
             ClearAudioCache();

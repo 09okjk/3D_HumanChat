@@ -1,4 +1,6 @@
-﻿using UnityEngine;
+﻿using System;
+using Manager;
+using UnityEngine;
     
 public class Host : MonoBehaviour
 {
@@ -10,14 +12,38 @@ public class Host : MonoBehaviour
     private float _standStartTime = 0f;
     private bool _isTurning = false;
     private Quaternion _targetRotation;
+    
+    bool canMove = true; // 是否可以移动
 
     private void Awake()
     {
         _transform = transform;
     }
 
+    private void Start()
+    {
+        PresentationManager.Instance.OnPresentationCompleted += () =>
+        {
+            SetState(HostState.Idle); // 重置状态为Idle
+            canMove = false; // 演示完成后可以移动
+        };
+    }
+    
+    private void OnDestroy()
+    {
+        if (PresentationManager.Instance != null)
+        {
+            PresentationManager.Instance.OnPresentationCompleted -= () => canMove = true;
+        }
+    }
+
     private void Update()
     {
+        if (!canMove)
+        {
+            return; // 如果不能移动，直接返回
+        }
+        
         if (_isTurning)
         {
             // 旋转到目标朝向
