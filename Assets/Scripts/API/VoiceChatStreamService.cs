@@ -17,15 +17,24 @@ namespace API
         public string session_id;
         // 音频文件将通过multipart/form-data上传
     }
-
+    
     [System.Serializable]
     public class VoiceChatStreamResponse
     {
-        public string type; // "text" 或 "audio"
-        public string content; // 文本内容或base64音频数据
-        public string session_id;
-        public bool is_final;
-        public float timestamp;
+        public string type; // "recognition", "text", "audio", "error", "done"
+        public string request_id; // 请求ID
+        public string segment_id; // 段落ID (可选)
+        public string text; // 文本内容
+        public string audio; // base64音频数据
+        public string format; // 音频格式
+        public string message; // 错误消息
+        public float processing_time; // 处理时间
+    
+        // 兼容性属性
+        public string content => text;
+        public string session_id => request_id;
+        public float timestamp => processing_time;
+        public bool is_final => type == "done";
     }
 
     public class VoiceChatStreamService : ApiServiceBase
@@ -151,224 +160,422 @@ namespace API
             StartCoroutine(SendVoiceChatStreamRequest());
         }
         
-        /// <summary>
-        /// 发送语音对话流式请求
-        /// </summary>
-        public void SendVoiceChatStream(AudioClip audioClip, string llmModel = null, string systemPrompt = null, string sessionId = null)
-        {
-            if (audioClip == null)
-            {
-                OnError?.Invoke("音频片段为空");
-                return;
-            }
-            
-            recordedClip = audioClip;
-            StartCoroutine(SendVoiceChatStreamRequest(llmModel, systemPrompt, sessionId));
-        }
+        // /// <summary>
+        // /// 发送语音对话流式请求
+        // /// </summary>
+        // public void SendVoiceChatStream(AudioClip audioClip, string llmModel = null, string systemPrompt = null, string sessionId = null)
+        // {
+        //     if (audioClip == null)
+        //     {
+        //         OnError?.Invoke("音频片段为空");
+        //         return;
+        //     }
+        //     
+        //     recordedClip = audioClip;
+        //     StartCoroutine(SendVoiceChatStreamRequest(llmModel, systemPrompt, sessionId));
+        // }
         
         private IEnumerator SendVoiceChatStreamRequest(string llmModel = null, string systemPrompt = null, string sessionIdParam = null)
         {
             OnVoiceChatStarted?.Invoke();
-            
+    
             if (recordedClip == null)
             {
                 OnError?.Invoke("没有录音数据");
                 yield break;
             }
-            
+    
             // 将AudioClip转换为WAV字节数组
             byte[] audioData = ConvertAudioClipToWav(recordedClip);
-            
+    
             if (audioData == null)
             {
                 OnError?.Invoke("音频数据转换失败");
                 yield break;
             }
-            
+    
             // 构建URL参数
             Dictionary<string, object> parameters = new Dictionary<string, object>();
-            
+    
             if (!string.IsNullOrEmpty(llmModel ?? defaultLlmModel))
             {
                 parameters["llm_model"] = llmModel ?? defaultLlmModel;
             }
-            
+    
             if (!string.IsNullOrEmpty(systemPrompt ?? defaultSystemPrompt))
             {
                 parameters["system_prompt"] = systemPrompt ?? defaultSystemPrompt;
             }
-            
+    
             if (!string.IsNullOrEmpty(sessionIdParam ?? sessionId))
             {
                 parameters["session_id"] = sessionIdParam ?? sessionId;
             }
-            
+    
             string url = BuildUrlWithParams($"{baseUrl}/api/chat/voice/stream", parameters);
-            
-            // 创建multipart/form-data请求
-            using (UnityWebRequest request = CreateVoiceChatStreamRequest(url, audioData))
-            {
-                if (enableDebugLogs)
-                {
-                    Debug.Log($"发送语音对话流式请求: {url}");
-                }
-                
-                yield return request.SendWebRequest();
-                
-                if (IsRequestSuccessful(request))
-                {
-                    if (enableDebugLogs)
-                    {
-                        Debug.Log("语音对话流式请求成功");
-                    }
-                    
-                    // 处理流式响应
-                    yield return ProcessVoiceChatStreamResponse(request.downloadHandler.text);
-                }
-                else
-                {
-                    HandleRequestError(request, "语音对话流式请求");
-                }
-            }
-            
+    
+            // 使用真正的流式处理
+            yield return StartCoroutine(ProcessStreamingRequest(url, audioData));
+    
             OnVoiceChatCompleted?.Invoke();
         }
         
         /// <summary>
-        /// 创建语音对话流式请求
+        /// 处理流式请求 - 真正的流式实现
         /// </summary>
-        private UnityWebRequest CreateVoiceChatStreamRequest(string url, byte[] audioData)
+        private IEnumerator ProcessStreamingRequest(string url, byte[] audioData)
         {
             List<IMultipartFormSection> formData = new List<IMultipartFormSection>();
-            formData.Add(new MultipartFormFileSection("audio", audioData, "audio.wav", "audio/wav"));
-            
-            UnityWebRequest request = UnityWebRequest.Post(url, formData);
-            
-            // 设置超时
-            request.timeout = timeoutSeconds;
-            
-            // 设置请求头
-            request.SetRequestHeader("Accept", "application/json");
-            request.SetRequestHeader("User-Agent", $"Unity-VoiceChatStream/1.0");
-            
-            // 设置证书处理器
-            if (skipSSLValidation && baseUrl.StartsWith("https://"))
+            formData.Add(new MultipartFormFileSection("audio_file", audioData, "audio.wav", "audio/wav"));
+    
+            using (UnityWebRequest request = UnityWebRequest.Post(url, formData))
             {
-                request.certificateHandler = new AcceptAllCertificatesSignedWithASpecificKeyPublicKey();
-            }
-            
-            return request;
-        }
+                // 设置请求头
+                request.SetRequestHeader("Accept", "application/x-ndjson");
+                request.SetRequestHeader("User-Agent", "Unity-VoiceChatStream/1.0");
         
-        /// <summary>
-        /// 处理流式响应 - 简化版本
-        /// </summary>
-        private IEnumerator ProcessVoiceChatStreamResponse(string responseText)
-        {
-            if (string.IsNullOrEmpty(responseText))
-            {
-                OnError?.Invoke("流式响应为空");
-                yield break;
-            }
-    
-            // 分割响应文本
-            string[] responseLines = responseText.Split(new char[] { '\n', '\r' }, 
-                StringSplitOptions.RemoveEmptyEntries);
-    
-            foreach (string line in responseLines)
-            {
-                string jsonData = line.Trim();
-
-                // 处理SSE格式（如果后端使用SSE）
-                if (jsonData.StartsWith("data: "))
-                {
-                    jsonData = jsonData.Substring(6).Trim();
-                }
-
-                // 跳过空行和结束标记
-                if (string.IsNullOrEmpty(jsonData) || jsonData == "[DONE]")
-                    continue;
-
-                // 将解析和处理分开
-                VoiceChatStreamResponse response = null;
-                try
-                {
-                    response = JsonUtility.FromJson<VoiceChatStreamResponse>(jsonData);
-                }
-                catch (Exception e)
-                {
-                    if (enableDebugLogs)
-                    {
-                        Debug.LogWarning($"解析流式响应行失败: {jsonData}, 错误: {e.Message}");
-                    }
-                    // 继续处理下一行，不中断整个流程
-                    continue;
-                }
-
-                // 在try/catch块外部处理响应
-                if (response != null)
-                {
-                    yield return ProcessStreamResponseItem(response);
-                }
-
-                // 添加小延迟以模拟流式效果
-                yield return new WaitForSeconds(0.05f);
-            }
-    
-            OnStreamCompleted?.Invoke(sessionId);
-        }
+                // 设置超时（流式请求需要更长时间）
+                request.timeout = timeoutSeconds * 3; // 增加超时时间
         
-        /// <summary>
-        /// 处理单个流式响应项
-        /// </summary>
-        private IEnumerator ProcessStreamResponseItem(VoiceChatStreamResponse response)
-        {
-            if (response.type == "text" && enableTextOutput)
-            {
-                OnTextReceived?.Invoke(response.content);
-                
+                // 设置证书处理器
+                if (skipSSLValidation && baseUrl.StartsWith("https://"))
+                {
+                    request.certificateHandler = new AcceptAllCertificatesSignedWithASpecificKeyPublicKey();
+                }
+        
                 if (enableDebugLogs)
                 {
-                    Debug.Log($"接收到文本: {response.content}");
+                    Debug.Log($"发送流式语音对话请求: {url}");
+                }
+        
+                // 开始请求但不等待完成
+                var operation = request.SendWebRequest();
+        
+                // 实时处理流式数据
+                yield return StartCoroutine(ProcessRealTimeStream(request, operation));
+        
+                // 检查最终状态
+                if (request.result != UnityWebRequest.Result.Success)
+                {
+                    HandleRequestError(request, "流式语音对话请求");
                 }
             }
-            else if (response.type == "audio" && autoPlayAudio)
-            {
-                yield return ProcessAudioResponse(response);
-            }
-            
-            yield return null;
         }
         
         /// <summary>
-        /// 处理音频响应
+        /// 实时处理流式数据
         /// </summary>
-        private IEnumerator ProcessAudioResponse(VoiceChatStreamResponse response)
+        private IEnumerator ProcessRealTimeStream(UnityWebRequest request, UnityWebRequestAsyncOperation operation)
         {
-            AudioClip audioClip = null;
+            string buffer = "";
+            long lastProcessedBytes = 0;
     
+            while (!operation.isDone)
+            {
+                // 获取已下载的数据
+                byte[] data = request.downloadHandler?.data;
+                if (data != null && data.Length > lastProcessedBytes)
+                {
+                    // 处理新接收到的数据
+                    string newData = System.Text.Encoding.UTF8.GetString(
+                        data, (int)lastProcessedBytes, (int)(data.Length - lastProcessedBytes));
+            
+                    buffer += newData;
+                    lastProcessedBytes = data.Length;
+            
+                    // 处理缓冲区中的完整行
+                    buffer = ProcessStreamBuffer(buffer);
+            
+                    if (enableDebugLogs && !string.IsNullOrEmpty(newData))
+                    {
+                        Debug.Log($"接收到流式数据: {newData.Length} 字节");
+                    }
+                }
+        
+                yield return new WaitForSeconds(0.01f); // 频繁检查新数据
+            }
+    
+            // 处理剩余的缓冲区数据
+            if (!string.IsNullOrEmpty(buffer.Trim()))
+            {
+                ProcessStreamBuffer(buffer + "\n"); // 确保最后一行被处理
+            }
+        }
+        
+        /// <summary>
+        /// 处理流式数据缓冲区
+        /// </summary>
+        private string ProcessStreamBuffer(string buffer)
+        {
+            string[] lines = buffer.Split('\n');
+    
+            // 处理除最后一行外的所有完整行
+            for (int i = 0; i < lines.Length - 1; i++)
+            {
+                string line = lines[i].Trim();
+                if (!string.IsNullOrEmpty(line))
+                {
+                    ProcessSingleJsonLine(line);
+                }
+            }
+    
+            // 返回最后一行（可能不完整）
+            return lines[lines.Length - 1];
+        }
+
+        /// <summary>
+        /// 处理单行JSON数据
+        /// </summary>
+        private void ProcessSingleJsonLine(string jsonLine)
+        {
             try
             {
-                if (string.IsNullOrEmpty(response.content))
+                VoiceChatStreamResponse response = JsonUtility.FromJson<VoiceChatStreamResponse>(jsonLine);
+                if (response != null)
                 {
-                    yield break;
+                    // 立即处理响应，不使用协程以保证实时性
+                    ProcessStreamResponseImmediate(response);
                 }
+            }
+            catch (Exception e)
+            {
+                if (enableDebugLogs)
+                {
+                    Debug.LogWarning($"解析JSON行失败: {jsonLine}\n错误: {e.Message}");
+                }
+            }
+        }
+        
+        /// <summary>
+        /// 立即处理流式响应（非协程版本，保证实时性）
+        /// </summary>
+        private void ProcessStreamResponseImmediate(VoiceChatStreamResponse response)
+        {
+            switch (response.type)
+            {
+                case "recognition":
+                    // 语音识别结果
+                    if (enableTextOutput && !string.IsNullOrEmpty(response.text))
+                    {
+                        OnTextReceived?.Invoke($"[识别] {response.text}");
+                        if (enableDebugLogs)
+                        {
+                            Debug.Log($"语音识别: {response.text}");
+                        }
+                    }
+                    break;
+            
+                case "text":
+                    // 文本响应片段
+                    if (enableTextOutput && !string.IsNullOrEmpty(response.text))
+                    {
+                        OnTextReceived?.Invoke(response.text);
+                        if (enableDebugLogs)
+                        {
+                            Debug.Log($"接收到文本片段: {response.text}");
+                        }
+                    }
+                    break;
+            
+                case "audio":
+                    // 音频响应片段
+                    if (autoPlayAudio && !string.IsNullOrEmpty(response.audio))
+                    {
+                        // 启动协程处理音频（异步处理）
+                        StartCoroutine(ProcessAudioSegment(response));
+                    }
+                    break;
+            
+                case "error":
+                    // 错误信息
+                    string errorMsg = response.message ?? "未知错误";
+                    OnError?.Invoke(errorMsg);
+                    if (enableDebugLogs)
+                    {
+                        Debug.LogError($"服务器错误: {errorMsg}");
+                    }
+                    break;
+            
+                case "done":
+                    // 完成信号
+                    OnStreamCompleted?.Invoke(response.request_id);
+                    if (enableDebugLogs)
+                    {
+                        Debug.Log($"流式响应完成，处理时间: {response.processing_time}s");
+                    }
+                    break;
+            
+                default:
+                    if (enableDebugLogs)
+                    {
+                        Debug.LogWarning($"未知的响应类型: {response.type}");
+                    }
+                    break;
+            }
+        }
+        
+        /// <summary>
+        /// 处理音频片段
+        /// </summary>
+        private IEnumerator ProcessAudioSegment(VoiceChatStreamResponse response)
+        {
+            AudioClip audioClip = ConvertBase64ToAudioClip(response);
+    
+            if (audioClip != null)
+            {
+                // 将音频添加到队列
+                audioQueue.Add(audioClip);
+        
+                // 如果当前没有播放音频，开始播放队列
+                if (!isPlayingAudio)
+                {
+                    yield return StartCoroutine(PlayAudioQueue());
+                }
+            }
+        }
 
+        /// <summary>
+        /// 播放音频队列
+        /// </summary>
+        private IEnumerator PlayAudioQueue()
+        {
+            isPlayingAudio = true;
+    
+            while (audioQueue.Count > 0)
+            {
+                AudioClip clip = audioQueue[0];
+                audioQueue.RemoveAt(0);
+        
+                if (clip != null)
+                {
+                    yield return PlayAudioClip(clip);
+                }
+            }
+    
+            isPlayingAudio = false;
+        }
+        
+        // /// <summary>
+        // /// 安全地解析JSON响应（不使用yield return）
+        // /// </summary>
+        // private VoiceChatStreamResponse ParseJsonSafely(string jsonData)
+        // {
+        //     try
+        //     {
+        //         return JsonUtility.FromJson<VoiceChatStreamResponse>(jsonData);
+        //     }
+        //     catch (Exception e)
+        //     {
+        //         if (enableDebugLogs)
+        //         {
+        //             Debug.LogWarning($"解析流式响应行失败: {jsonData}, 错误: {e.Message}");
+        //         }
+        //         return null;
+        //     }
+        // }
+        //
+        // /// <summary>
+        // /// 处理单个流式响应项 - 修正版本
+        // /// </summary>
+        // private IEnumerator ProcessStreamResponseItem(VoiceChatStreamResponse response)
+        // {
+        //     switch (response.type)
+        //     {
+        //         case "recognition":
+        //             // 语音识别结果
+        //             if (enableTextOutput && !string.IsNullOrEmpty(response.text))
+        //             {
+        //                 OnTextReceived?.Invoke($"[识别] {response.text}");
+        //                 if (enableDebugLogs)
+        //                 {
+        //                     Debug.Log($"语音识别: {response.text}");
+        //                 }
+        //             }
+        //             break;
+        //     
+        //         case "text":
+        //             // 文本响应
+        //             if (enableTextOutput && !string.IsNullOrEmpty(response.text))
+        //             {
+        //                 OnTextReceived?.Invoke(response.text);
+        //                 if (enableDebugLogs)
+        //                 {
+        //                     Debug.Log($"接收到文本: {response.text}");
+        //                 }
+        //             }
+        //             break;
+        //     
+        //         case "audio":
+        //             // 音频响应
+        //             if (autoPlayAudio && !string.IsNullOrEmpty(response.audio))
+        //             {
+        //                 yield return ProcessAudioResponse(response);
+        //             }
+        //             break;
+        //     
+        //         case "done":
+        //             // 完成信号
+        //             if (enableDebugLogs)
+        //             {
+        //                 Debug.Log($"流式响应完成，处理时间: {response.processing_time}s");
+        //             }
+        //             break;
+        //     
+        //         default:
+        //             if (enableDebugLogs)
+        //             {
+        //                 Debug.LogWarning($"未知的响应类型: {response.type}");
+        //             }
+        //             break;
+        //     }
+        //
+        //     yield return null;
+        // }
+        //
+        // /// <summary>
+        // /// 处理音频响应 - 修正版本（修复try/catch中的yield return问题）
+        // /// </summary>
+        // private IEnumerator ProcessAudioResponse(VoiceChatStreamResponse response)
+        // {
+        //     if (string.IsNullOrEmpty(response.audio))
+        //     {
+        //         yield break;
+        //     }
+        //
+        //     // 先处理音频数据转换（在try/catch中，但不使用yield）
+        //     AudioClip audioClip = ConvertBase64ToAudioClip(response);
+        //
+        //     // 如果转换成功，播放音频（在try/catch外部，可以使用yield）
+        //     if (audioClip != null && autoPlayAudio)
+        //     {
+        //         yield return PlayAudioClip(audioClip);
+        //     }
+        // }
+
+        /// <summary>
+        /// 将base64音频数据转换为AudioClip（不使用yield return）
+        /// </summary>
+        private AudioClip ConvertBase64ToAudioClip(VoiceChatStreamResponse response)
+        {
+            try
+            {
                 // 解码base64音频数据
-                byte[] audioBytes = Convert.FromBase64String(response.content);
+                byte[] audioBytes = Convert.FromBase64String(response.audio);
 
                 // 转换为AudioClip
-                audioClip = WavUtility.ToAudioClip(audioBytes);
+                AudioClip audioClip = WavUtility.ToAudioClip(audioBytes);
 
                 if (audioClip != null)
                 {
-                    audioClip.name = $"VoiceResponse_{response.timestamp}";
+                    audioClip.name = $"VoiceResponse_{response.segment_id}";
                     OnAudioReceived?.Invoke(audioClip);
-            
+    
                     if (enableDebugLogs)
                     {
                         Debug.Log($"接收到音频: {audioClip.name}, 长度: {audioClip.length}s");
                     }
+            
+                    return audioClip;
                 }
             }
             catch (Exception e)
@@ -380,11 +587,7 @@ namespace API
                 }
             }
     
-            // 将播放逻辑移到try/catch块外部
-            if (audioClip != null && autoPlayAudio)
-            {
-                yield return PlayAudioClip(audioClip);
-            }
+            return null;
         }
         
         /// <summary>
@@ -465,72 +668,41 @@ namespace API
             }
         }
         
-        /// <summary>
-        /// 检查麦克风权限
-        /// </summary>
-        public bool CheckMicrophonePermission()
-        {
-            return Application.HasUserAuthorization(UserAuthorization.Microphone);
-        }
-        
-        /// <summary>
-        /// 请求麦克风权限
-        /// </summary>
-        public void RequestMicrophonePermission()
-        {
-            if (!CheckMicrophonePermission())
-            {
-                StartCoroutine(RequestMicrophonePermissionCoroutine());
-            }
-        }
-        
-        private IEnumerator RequestMicrophonePermissionCoroutine()
-        {
-            yield return Application.RequestUserAuthorization(UserAuthorization.Microphone);
-            
-            if (CheckMicrophonePermission())
-            {
-                if (enableDebugLogs)
-                {
-                    Debug.Log("麦克风权限已获取");
-                }
-            }
-            else
-            {
-                OnError?.Invoke("麦克风权限被拒绝");
-            }
-        }
-        
-        /// <summary>
-        /// 获取当前会话ID
-        /// </summary>
-        public string GetSessionId()
-        {
-            return sessionId;
-        }
-        
-        /// <summary>
-        /// 设置新的会话ID
-        /// </summary>
-        public void SetSessionId(string newSessionId)
-        {
-            sessionId = newSessionId;
-        }
-        
-        /// <summary>
-        /// 重置会话（生成新的会话ID）
-        /// </summary>
-        public void ResetSession()
-        {
-            sessionId = System.Guid.NewGuid().ToString();
-            audioQueue.Clear();
-            
-            if (enableDebugLogs)
-            {
-                Debug.Log($"会话已重置，新会话ID: {sessionId}");
-            }
-        }
-        
+        // /// <summary>
+        // /// 检查麦克风权限
+        // /// </summary>
+        // public bool CheckMicrophonePermission()
+        // {
+        //     return Application.HasUserAuthorization(UserAuthorization.Microphone);
+        // }
+        //
+        // /// <summary>
+        // /// 请求麦克风权限
+        // /// </summary>
+        // public void RequestMicrophonePermission()
+        // {
+        //     if (!CheckMicrophonePermission())
+        //     {
+        //         StartCoroutine(RequestMicrophonePermissionCoroutine());
+        //     }
+        // }
+        //
+        // private IEnumerator RequestMicrophonePermissionCoroutine()
+        // {
+        //     yield return Application.RequestUserAuthorization(UserAuthorization.Microphone);
+        //     
+        //     if (CheckMicrophonePermission())
+        //     {
+        //         if (enableDebugLogs)
+        //         {
+        //             Debug.Log("麦克风权限已获取");
+        //         }
+        //     }
+        //     else
+        //     {
+        //         OnError?.Invoke("麦克风权限被拒绝");
+        //     }
+        // }
         private void OnDestroy()
         {
             StopVoiceChatStream();
