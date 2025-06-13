@@ -261,7 +261,7 @@ namespace API
         }
         
         /// <summary>
-        /// 处理流式响应
+        /// 处理流式响应 - 简化版本
         /// </summary>
         private IEnumerator ProcessVoiceChatStreamResponse(string responseText)
         {
@@ -270,26 +270,51 @@ namespace API
                 OnError?.Invoke("流式响应为空");
                 yield break;
             }
-            
-            // 解析流式响应（假设后端返回的是换行分隔的JSON）
-            string[] responseLines = responseText.Split('\n');
-            
+    
+            // 分割响应文本
+            string[] responseLines = responseText.Split(new char[] { '\n', '\r' }, 
+                StringSplitOptions.RemoveEmptyEntries);
+    
             foreach (string line in responseLines)
             {
-                if (string.IsNullOrEmpty(line.Trim()))
+                string jsonData = line.Trim();
+
+                // 处理SSE格式（如果后端使用SSE）
+                if (jsonData.StartsWith("data: "))
+                {
+                    jsonData = jsonData.Substring(6).Trim();
+                }
+
+                // 跳过空行和结束标记
+                if (string.IsNullOrEmpty(jsonData) || jsonData == "[DONE]")
                     continue;
-                
-                VoiceChatStreamResponse response = ParseJsonResponse<VoiceChatStreamResponse>(line, "语音对话流式响应");
-                
+
+                // 将解析和处理分开
+                VoiceChatStreamResponse response = null;
+                try
+                {
+                    response = JsonUtility.FromJson<VoiceChatStreamResponse>(jsonData);
+                }
+                catch (Exception e)
+                {
+                    if (enableDebugLogs)
+                    {
+                        Debug.LogWarning($"解析流式响应行失败: {jsonData}, 错误: {e.Message}");
+                    }
+                    // 继续处理下一行，不中断整个流程
+                    continue;
+                }
+
+                // 在try/catch块外部处理响应
                 if (response != null)
                 {
                     yield return ProcessStreamResponseItem(response);
                 }
-                
+
                 // 添加小延迟以模拟流式效果
-                yield return new WaitForSeconds(0.1f);
+                yield return new WaitForSeconds(0.05f);
             }
-            
+    
             OnStreamCompleted?.Invoke(sessionId);
         }
         
